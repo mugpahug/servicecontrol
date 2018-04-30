@@ -6,17 +6,12 @@ This script is designed to wrap around external services
 and provide access to starting/stopping that service
 using remote procedure calls.
 
-The reason is to allow adfags to start/stop spacelink and potentially
-also gnuradio and hamlib when it needs to and thereby improve reliability
-
-
 @author: kjetil
 """
 from __future__ import print_function
 
 
 from SimpleXMLRPCServer import SimpleXMLRPCServer
-#from xmlrpclib import ServerProxy
 import subprocess
 import threading
 import argparse
@@ -65,7 +60,6 @@ class ServiceControl():
         self._stdout = []
         self._stderr = []
         self.cpu_threshold = cputhreshold
-        #self._buf = dict()
         self._echo = echo
         self._stop_monitor = False
 
@@ -143,19 +137,14 @@ class ServiceControl():
         while self._p.poll() is None:
 
             polled = poller.poll(100)
-            #print('AA %s'%(polled))
             streams = [scmap[p[0]] for p in polled]
 
             for stream in streams:
                 so = stream[0].readline()[:-1]
-                #so = os.read(polled[0][0], 1)#read(1)
                 if so:
                     if self._echo:
-                        #print("%s"%so, file=stream[2], end='')
-                        #stream[2].flush()
                         log.debug("%s"%so)
 
-                    #stream[1].append(so)
                     self._stdout =  self._stdout[-self.MAX_BUFLEN:]
                     self._stderr =  self._stderr[-self.MAX_BUFLEN:]
 
@@ -165,8 +154,6 @@ class ServiceControl():
             log.debug("%s"%self._p.stdout.read())
             log.debug("%s"%self._p.stderr.read())
 
-        #print(sc._p.stdout.read())
-        #print(sc._p.stderr.read(), file=sys.stderr)
         self._p = None
 
 
@@ -216,18 +203,6 @@ class ServiceControl():
 
     def cpu(self):
         return float(self._ps("pcpu"))
-#        #TODO: Check if I should check PID or PGID
-#        #TODO: Find a way to set custom delimiter. Limiting by field width is not nice
-#        FW = 100
-#        ps_fields = ['pcpu','pid','pgid','sid','user','args']
-#        ps_fields2 = ["%s:%d"%(p,FW) for p in ps_fields]
-#        ret = subprocess.check_output(["ps", "-p", "%s"%(self.pid()), "-o", ",".join(ps_fields2),"--no-headers"])
-#
-#        retd = {}
-#        for k,v in enumerate(ps_fields):
-#            retd[v] = ret[k*FW:(k+1)*FW].strip()
-#
-#        return retd
 
     def pid(self):
         return self._p.pid
@@ -246,7 +221,6 @@ class ServiceControl():
             self._pthr.join()
             self._p = None
 
-
     def stdout(self):
         if self._p is None:
             log.error('Process is not running')
@@ -261,10 +235,6 @@ class ServiceControl():
             return ''
         else:
             return ''.join(self._stderr)
-
-
-
-
 
 
 def main():
@@ -302,7 +272,6 @@ def main():
     # Enable logging
     if args.log is not None:
         cf = logging.handlers.TimedRotatingFileHandler(args.log,when='midnight',interval=1,backupCount=0,utc=True)
-        #cf = logging.FileHandler(args.log)
         formatter = LogFormatter('%(asctime)s - %(levelname)5s - "%(message)s"')
         cf.setFormatter(formatter)
         log.addHandler(cf)
