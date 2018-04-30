@@ -53,7 +53,7 @@ setup(
     # project code, see
     # https://packaging.python.org/en/latest/single_source_version.html
     #use_scm_version=True,
-    version='0.9.0',  # Required
+    version='0.9.1',  # Required
 
     # This is a one-line description or tagline of what your project does. This
     # corresponds to the "Summary" metadata field:
@@ -75,6 +75,8 @@ setup(
     # This field corresponds to the "Home-Page" metadata field:
     # https://packaging.python.org/specifications/core-metadata/#home-page-optional
     #url='https://github.com/pypa/sampleproject',  # Optional
+    url='https://github.com/kworm1/servicecontrol',
+
 
     # This should be your name or the name of the organization which owns the
     # project.
