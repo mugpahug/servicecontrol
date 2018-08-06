@@ -23,8 +23,24 @@ import logging.handlers
 import signal
 import time
 
+if not (sys.platform == "linux" or sys.platform == "linux2"):
+    print("Servicecontrol has been made for linux, whereas your system reports something else ({}). It probably wont work.\n\n")
+
+
+# Import libc if possible so we can use PDEATHSIG
+try:
+    from ctypes import cdll
+    libc = cdll['libc.so.6']
+except Exception as e:
+    libc = None
+
+PR_SET_PDEATHSIG = 1
+
+
+
 class LogFormatter(logging.Formatter):
     converter = time.gmtime
+    DEFAULT_FORMAT =  'scontr - %(asctime)s - %(levelname)5s - "%(message)s"'
 
     def formatTime(self, record, datefmt=None):
         ct = self.converter(record.created)
@@ -33,12 +49,21 @@ class LogFormatter(logging.Formatter):
 
         return s
 
+
+
 log = logging.getLogger('servicecontrol')
 log.setLevel(logging.DEBUG)
+
 ch = logging.StreamHandler(sys.stdout)
-formatter = LogFormatter('%(asctime)s - %(levelname)5s - "%(message)s"')
+formatter = LogFormatter(LogFormatter.DEFAULT_FORMAT)#'%(asctime)s - %(levelname)5s - "%(message)s"')
 ch.setFormatter(formatter)
 log.addHandler(ch)
+
+log_output = logging.getLogger('servicecontrol-output')
+log_output.setLevel(logging.DEBUG)
+ch_output = logging.StreamHandler(sys.stdout)
+
+
 
 
 class ServiceControl():
@@ -52,7 +77,17 @@ class ServiceControl():
     #
     MIN_BOOT_TIME = 3.0
 
-    def __init__(self, args, addr="localhost", port=9000, echo=True, autorestart=False, cputhreshold = None):
+    #
+    # The timeout after sending SIGTERM before trying again with SIGKILL (can be changed in constructor)
+    #
+    DEFAULT_KILL_TIMEOUT = 60
+
+    #
+    # The port numbe
+    #
+    DEFAULT_PORT_NO = 9000
+
+    def __init__(self, args, addr="localhost", port=DEFAULT_PORT_NO, echo=True, autorestart=False, cputhreshold = None, kill_timeout=DEFAULT_KILL_TIMEOUT):
         self.args = args
         self._p = None
         self._addr = addr
@@ -62,8 +97,8 @@ class ServiceControl():
         self.cpu_threshold = cputhreshold
         self._echo = echo
         self._stop_monitor = False
-
         self.autorestart = autorestart
+        self._kill_timeout = kill_timeout
 
         self.server = SimpleXMLRPCServer((self._addr, self._port), allow_none=True)
         self._pthr_rpc = threading.Thread(target=self.server.serve_forever)
@@ -82,6 +117,23 @@ class ServiceControl():
         self.server.register_function(self.pgid)
         self.server.register_function(self.cpu)
 
+        # Log a warning if libc is not available
+        if libc is None:
+            log.warning('libc is not available so cannot set PDEATH_SIG in children. Cannot guarantee all children will exit')
+
+    def _preexec(self):
+        # Reassign session id to the child process (allows us to kill process group)
+        os.setsid()
+
+        # Also set death signal so that processes get SIGKILL if parent terminates unexpectedly
+        if libc:
+            result = libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+            log.debug('PR_DEATHSIG set to SIGKILL for process {}'.format(os.getpid()))
+        else:
+            log.debug('Could not set PR_DEATHSIG for process {}'.format(os.getpid()))
+
+        if result != 0:
+            raise Exception('prctl failed with error code {}'.format(result))
 
 
     def _monitor_cpu(self):
@@ -135,7 +187,6 @@ class ServiceControl():
         t0 = time.time()
 
         while self._p.poll() is None:
-
             polled = poller.poll(100)
             streams = [scmap[p[0]] for p in polled]
 
@@ -143,16 +194,16 @@ class ServiceControl():
                 so = stream[0].readline()[:-1]
                 if so:
                     if self._echo:
-                        log.debug("%s"%so)
+                        log_output.debug("{}".format(so))
 
                     self._stdout =  self._stdout[-self.MAX_BUFLEN:]
                     self._stderr =  self._stderr[-self.MAX_BUFLEN:]
 
-        log.info("Process stopped")
+        log.info("Process has stopped")
 
         if self._echo:
-            log.debug("%s"%self._p.stdout.read())
-            log.debug("%s"%self._p.stderr.read())
+            log_output.debug("%s"%self._p.stdout.read())
+            log_output.debug("%s"%self._p.stderr.read())
 
         self._p = None
 
@@ -176,7 +227,7 @@ class ServiceControl():
             stdin=None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            preexec_fn=os.setsid,
+            preexec_fn=self._preexec,
             cwd=None,
             universal_newlines=True,
             )
@@ -210,15 +261,25 @@ class ServiceControl():
     def pgid(self):
         return os.getpgid(self._p.pid)
 
-    def kill(self, sig=signal.SIGTERM):
+    def kill(self):
         if self._p is None:
             log.error('Process is not running')
             return
         else:
             self._stop_monitor = True
-            os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
+            pgid = self.pgid()
+            os.killpg(pgid, signal.SIGTERM)
             self._should_still_be_running = False
-            self._pthr.join()
+
+            self._pthr.join(timeout=self._kill_timeout)
+            if self._pthr.isAlive() :
+                log.error("Signal SIGTERM failed to terminate process in {} sec, sending SIGKILL".format(self._kill_timeout))
+                os.killpg(pgid, signal.SIGKILL)
+                self._pthr.join(timeout=self._kill_timeout)
+                if self._pthr.isAlive():
+                    log.error("Failed to terminate process, giving up.")
+                    return
+
             self._p = None
 
     def stdout(self):
@@ -260,6 +321,8 @@ def main():
     parser.add_argument("--autorestart", action="store_true")
     parser.add_argument("--cpurestart", type=float, help="Set CPU threshold to automatically restart service at")
     parser.add_argument("--log", type=str, help="Filename to log to (default is None - stdout only)" )
+    parser.add_argument("--kill-timeout", type=int, help="Delay to wait after trying to terminate a process before sending SIGKILL, and then before giving up. Default={}".format(ServiceControl.DEFAULT_KILL_TIMEOUT))
+    parser.add_argument("--stream-as-log", action="store_true", help="If set, show process output with the normal log formatter. Otherwise show exactly as is")
     parser.add_argument("-i", "--interact", action="store_true")
     parser.add_argument("cmd", help="The command to parse")
 
@@ -272,12 +335,19 @@ def main():
     # Enable logging
     if args.log is not None:
         cf = logging.handlers.TimedRotatingFileHandler(args.log,when='midnight',interval=1,backupCount=0,utc=True)
-        formatter = LogFormatter('%(asctime)s - %(levelname)5s - "%(message)s"')
+        formatter = LogFormatter(LogFormatter.DEFAULT_FORMAT)
         cf.setFormatter(formatter)
         log.addHandler(cf)
+        log_output.addHandler(cf)
 
+    if args.stream_as_log:
+        ch_output.setFormatter(LogFormatter(LogFormatter.DEFAULT_FORMAT))
+        log_output.addHandler(ch_output)
+    else:
+        ch_output.setFormatter(LogFormatter("%(message)s"))
+        log_output.addHandler(ch_output)
 
-    sc = ServiceControl(argv, addr=args.addr, port=args.port,echo=(not args.no_echo), autorestart=args.autorestart, cputhreshold = args.cpurestart)
+    sc = ServiceControl(argv, addr=args.addr, port=args.port,echo=(not args.no_echo), autorestart=args.autorestart, cputhreshold = args.cpurestart, kill_timeout=args.kill_timeout)
 
     if args.start is True:
         sc.start()
@@ -286,8 +356,8 @@ def main():
         #
         # Define some wrapper functions to save user having to type sc.xxx
         #
-        def kill(sig=signal.SIGTERM):
-            sc.kill(sig)
+        def kill():
+            sc.kill()
 
         def start():
             sc.start()
