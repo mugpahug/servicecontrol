@@ -24,7 +24,7 @@ import signal
 import time
 
 if not (sys.platform == "linux" or sys.platform == "linux2"):
-    print("Servicecontrol has been made for linux, whereas your system reports something else ({}). It probably wont work.\n\n")
+    print("Servicecontrol has been made for linux, whereas your system reports something else ({}). It probably wont work.\n\n".format(sys.platform))
 
 
 # Import libc if possible so we can use PDEATHSIG
@@ -129,11 +129,13 @@ class ServiceControl():
         if libc:
             result = libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
             log.debug('PR_DEATHSIG set to SIGKILL for process {}'.format(os.getpid()))
+
+            if result != 0:
+                raise Exception('prctl failed with error code {}'.format(result))
+
         else:
             log.debug('Could not set PR_DEATHSIG for process {}'.format(os.getpid()))
 
-        if result != 0:
-            raise Exception('prctl failed with error code {}'.format(result))
 
 
     def _monitor_cpu(self):
@@ -335,7 +337,12 @@ def main():
     # Enable logging
     if args.log is not None:
         cf = logging.handlers.TimedRotatingFileHandler(args.log,when='midnight',interval=1,backupCount=0,utc=True)
-        formatter = LogFormatter(LogFormatter.DEFAULT_FORMAT)
+
+        if args.stream_as_log:
+            formatter = LogFormatter(LogFormatter.DEFAULT_FORMAT)
+        else:
+            formatter = LogFormatter("child  - %(message)s")
+
         cf.setFormatter(formatter)
         log.addHandler(cf)
         log_output.addHandler(cf)
@@ -344,8 +351,9 @@ def main():
         ch_output.setFormatter(LogFormatter(LogFormatter.DEFAULT_FORMAT))
         log_output.addHandler(ch_output)
     else:
-        ch_output.setFormatter(LogFormatter("%(message)s"))
+        ch_output.setFormatter(LogFormatter("child  - %(message)s"))
         log_output.addHandler(ch_output)
+
 
     sc = ServiceControl(argv, addr=args.addr, port=args.port,echo=(not args.no_echo), autorestart=args.autorestart, cputhreshold = args.cpurestart, kill_timeout=args.kill_timeout)
 

@@ -1,11 +1,15 @@
 import os
 import time
 import signal
-import prctl
+try:
+    import prctl
+    has_prctl = True
+except:
+    has_prctl = False
 
 
-from ctypes import cdll
-libc = cdll['libc.so.6']
+# from ctypes import cdll
+# libc = cdll['libc.so.6']
 
 def sigterm_handler(_signo, _stack_frame):
     print('PID {}. Got signal {}, but ignoring because I am naughty'.format(os.getpid(), _signo))
@@ -26,7 +30,11 @@ for i in range(3):
 
 time.sleep(.2)
 # libc.prctl(1, signal.SIGTERM)#signal.SIGKILL)
-deathsig = prctl.get_pdeathsig()
+if has_prctl:
+    deathsig = prctl.get_pdeathsig()
+else:
+    deathsig = 'UNKNOWN'
+
 print('My PID={}, My PGPID = {}, MySID = {}, My PR_DEATHSIG={}'.format(my_pid, os.getpgid(my_pid), os.getsid(my_pid), deathsig))
 
 
