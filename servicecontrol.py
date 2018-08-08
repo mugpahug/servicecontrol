@@ -201,7 +201,6 @@ class ServiceControl():
                     self._stdout =  self._stdout[-self.MAX_BUFLEN:]
                     self._stderr =  self._stderr[-self.MAX_BUFLEN:]
 
-        log.info("Process has stopped")
 
         if self._echo:
             log_output.debug("%s"%self._p.stdout.read())
@@ -215,7 +214,11 @@ class ServiceControl():
         # and only do so if some time has passed (in order to prevent constant
         # restart loops)
         if self._should_still_be_running and self.autorestart and time.time() - t0 > self.MIN_BOOT_TIME:
+            log.info("Process stopped unexpectedly, restarting")
             self.start()
+        elif self._should_still_be_running:
+            log.info("Process stopped unexpectedly")
+
 
 
     def start(self):
@@ -283,6 +286,7 @@ class ServiceControl():
                     return
 
             self._p = None
+            log.info("Process has been stopped")
 
     def stdout(self):
         if self._p is None:
@@ -323,7 +327,7 @@ def main():
     parser.add_argument("--autorestart", action="store_true")
     parser.add_argument("--cpurestart", type=float, help="Set CPU threshold to automatically restart service at")
     parser.add_argument("--log", type=str, help="Filename to log to (default is None - stdout only)" )
-    parser.add_argument("--kill-timeout", type=int, help="Delay to wait after trying to terminate a process before sending SIGKILL, and then before giving up. Default={}".format(ServiceControl.DEFAULT_KILL_TIMEOUT))
+    parser.add_argument("--kill-timeout", type=int, default=ServiceControl.DEFAULT_KILL_TIMEOUT, help="Delay to wait after trying to terminate a process before sending SIGKILL, and then before giving up. Default={}".format(ServiceControl.DEFAULT_KILL_TIMEOUT))
     parser.add_argument("--stream-as-log", action="store_true", help="If set, show process output with the normal log formatter. Otherwise show exactly as is")
     parser.add_argument("-i", "--interact", action="store_true")
     parser.add_argument("cmd", help="The command to parse")

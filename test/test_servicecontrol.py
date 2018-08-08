@@ -38,7 +38,7 @@ else:
 print('My PID={}, My PGPID = {}, MySID = {}, My PR_DEATHSIG={}'.format(my_pid, os.getpgid(my_pid), os.getsid(my_pid), deathsig))
 
 
-for i in range(10):
+for i in range(90):
     try:
         time.sleep(1.0)
     except Exception as e:
