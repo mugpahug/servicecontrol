@@ -78,6 +78,11 @@ class ServiceControl():
     MIN_BOOT_TIME = 3.0
 
     #
+    # If autorestart is on and it dies within MIN_BOOT_TIME, delay for this amount of time before trying another restart
+    #
+    MIN_RESTART_TIME = 30
+
+    #
     # The timeout after sending SIGTERM before trying again with SIGKILL (can be changed in constructor)
     #
     DEFAULT_KILL_TIMEOUT = 60
@@ -215,6 +220,10 @@ class ServiceControl():
         # restart loops)
         if self._should_still_be_running and self.autorestart and time.time() - t0 > self.MIN_BOOT_TIME:
             log.info("Process stopped unexpectedly, restarting")
+            self.start()
+        elif self._should_still_be_running and self.autorestart:
+            log.info("Process stopped unexpectedly and too quickly. Waiting {} seconds before trying to restart".format(self.MIN_RESTART_TIME))
+            time.sleep(self.MIN_RESTART_TIME)
             self.start()
         elif self._should_still_be_running:
             log.info("Process stopped unexpectedly")
