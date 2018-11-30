@@ -36,6 +36,17 @@ except Exception as e:
 
 PR_SET_PDEATHSIG = 1
 
+# Killer to catch sigterm and exit
+class Killer:
+    kill_now = False
+
+    @classmethod
+    def exit_gracefully(cls,signum, frame):
+        cls.kill_now = True
+
+    @classmethod
+    def register_signal(cls, signum):
+        signal.signal(signum, cls.exit_gracefully)
 
 
 class LogFormatter(logging.Formatter):
@@ -191,8 +202,6 @@ class ServiceControl():
             self._p.stdout.fileno():(self._p.stdout, self._stdout, sys.stdout),
             self._p.stderr.fileno():(self._p.stderr, self._stderr, sys.stderr)}
 
-        t0 = time.time()
-
         while self._p.poll() is None:
             polled = poller.poll(100)
             streams = [scmap[p[0]] for p in polled]
@@ -213,24 +222,38 @@ class ServiceControl():
 
         self._p = None
 
+    def _restarter(self):
 
-        # Check if program died a natural death, and if not restart
-        # if the autorestart flag has been set.
-        # and only do so if some time has passed (in order to prevent constant
-        # restart loops)
-        if self._should_still_be_running and self.autorestart and time.time() - t0 > self.MIN_BOOT_TIME:
-            log.info("Process stopped unexpectedly, restarting")
-            self.start()
-        elif self._should_still_be_running and self.autorestart:
-            log.info("Process stopped unexpectedly and too quickly. Waiting {} seconds before trying to restart".format(self.MIN_RESTART_TIME))
-            time.sleep(self.MIN_RESTART_TIME)
-            self.start()
-        elif self._should_still_be_running:
-            log.info("Process stopped unexpectedly")
+        while True:
 
+            # start process
+            t0 = time.time()
+            self._start()
 
+            # Wait for process to die
+            self._pthr.join()
+
+            # Check if program died a natural death, and if not restart
+            # if the autorestart flag has been set.
+            # and only do so if some time has passed (in order to prevent constant
+            # restart loops)
+            if self._should_still_be_running and self.autorestart and time.time() - t0 > self.MIN_BOOT_TIME:
+                log.info("Process stopped unexpectedly, restarting")
+                continue
+            elif self._should_still_be_running and self.autorestart:
+                log.info("Process stopped unexpectedly and too quickly. Waiting {} seconds before trying to restart".format(self.MIN_RESTART_TIME))
+                time.sleep(self.MIN_RESTART_TIME)
+                continue
+            elif self._should_still_be_running:
+                log.info("Process stopped unexpectedly")
+                break
 
     def start(self):
+        self._pthr_starter = threading.Thread(target=self._restarter)
+        self._pthr_starter.daemon = True
+        self._pthr_starter.start()
+
+    def _start(self):
         if self._p is not None:
             log.error('Process already running')
             return
@@ -259,6 +282,7 @@ class ServiceControl():
 
 
         self._should_still_be_running = True
+
 
 
     def _ps(self, option):
@@ -395,10 +419,12 @@ def main():
         import code
         code.interact(local=locals())
     else:
-        #Non-interactive mode. Loop forever
-        #Todo: catch/handle signals?
-        while True:
+        Killer.register_signal(signal.SIGTERM)
+        Killer.register_signal(signal.SIGINT)
+        while not Killer.kill_now:
             time.sleep(1)
+
+        log.info("SIGTERM or SIGINT received. Killing child and exiting")
 
     sc.kill()
 
