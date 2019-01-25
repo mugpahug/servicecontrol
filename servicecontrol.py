@@ -247,6 +247,11 @@ class ServiceControl():
             elif self._should_still_be_running:
                 log.info("Process stopped unexpectedly")
                 break
+            elif not self._should_still_be_running:
+                log.info("Process stopped expectedly")
+                break
+            else:
+                raise Exception("Unexpected error")
 
     def start(self):
         self._pthr_starter = threading.Thread(target=self._restarter)
@@ -319,7 +324,7 @@ class ServiceControl():
                     return
 
             self._p = None
-            log.info("Process has been stopped")
+            log.info("Servicecontrol is idle")
 
     def stdout(self):
         if self._p is None:
