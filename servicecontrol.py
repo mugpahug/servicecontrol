@@ -7,17 +7,22 @@ and provide access to starting/stopping that service
 using remote procedure calls.
 
 @author: kjetil
+@contributor: Edwin, added python3 support and memory buffered file logging to reduce disk IO 
 """
 from __future__ import print_function
 
 
-from SimpleXMLRPCServer import SimpleXMLRPCServer
+import sys
+if sys.version_info[0] < 3:
+    from SimpleXMLRPCServer import SimpleXMLRPCServer # good old Python 2
+else:
+    from xmlrpc.server import SimpleXMLRPCServer
+    
 import subprocess
 import threading
 import argparse
 import select
 import os
-import sys
 import logging
 import logging.handlers
 import signal
@@ -379,15 +384,16 @@ def main():
     # Enable logging
     if args.log is not None:
         cf = logging.handlers.TimedRotatingFileHandler(args.log,when='midnight',interval=1,backupCount=0,utc=True)
-
+        mh = logging.handlers.MemoryHandler(10,flushLevel=logging.ERROR,target=cf)
+        
         if args.stream_as_log:
             formatter = LogFormatter(LogFormatter.DEFAULT_FORMAT)
         else:
             formatter = LogFormatter("child  - %(message)s")
 
         cf.setFormatter(formatter)
-        log.addHandler(cf)
-        log_output.addHandler(cf)
+        log.addHandler(mh)
+        log_output.addHandler(mh)
 
     if args.stream_as_log:
         ch_output.setFormatter(LogFormatter(LogFormatter.DEFAULT_FORMAT))
